@@ -1,0 +1,73 @@
+name: mongo-sharding
+
+services:
+  # Config server: хранит метаданные кластера (какие чанки на каком шарде)
+  configSrv:
+    image: mongo:7.0
+    container_name: configSrv
+    hostname: configSrv
+    restart: always
+    command: ["mongod", "--configsvr", "--replSet", "config_server", "--bind_ip_all", "--port", "27017", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - config-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27017", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      start_period: 10s
+
+  # Шард 1
+  shard1:
+    image: mongo:7.0
+    container_name: shard1
+    hostname: shard1
+    restart: always
+    command: ["mongod", "--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27018", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - shard1-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27018", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      start_period: 10s
+
+  # Шард 2
+  shard2:
+    image: mongo:7.0
+    container_name: shard2
+    hostname: shard2
+    restart: always
+    command: ["mongod", "--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27019", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - shard2-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27019", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      start_period: 10s
+
+  # Роутер: единая точка входа для приложения, маршрутизирует запросы по шардам
+  mongos_router:
+    image: mongo:7.0
+    container_name: mongos_router
+    hostname: mongos_router
+    restart: always
+    command: ["mongos", "--configdb", "config_server/configSrv:27017", "--bind_ip_all", "--port", "27020"]
+    depends_on:
+      - configSrv
+      - shard1
+      - shard2
+
+  pymongo_api:
+    image: kazhem/pymongo_api:1.0.0
+    container_name: pymongo_api
+    restart: always
+    depends_on:
+      - mongos_router
+    ports:
+      - 8080:8080
+    environment:
+      MONGODB_URL: "mongodb://mongos_router:27020"
+      MONGODB_DATABASE_NAME: "somedb"
+
+volumes:
+  config-data:
+  shard1-data:
+  shard2-data:
